@@ -1,2 +1,10 @@
+# Overview
+
 Accent is a lightweight reliability layer for AMQP messaging within JVM languages.
+
+# Cutting Releases
+
+Cutting a release and bumping the next development version can be done with the Rakefile:
+
+$ rake release VERSION=0.1 DEV_VERSION=0.2-SNAPSHOT
 
