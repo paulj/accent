@@ -22,5 +22,5 @@ end
 
 task :release => :prepare do
   puts "Performing release #{@version}"
-  sh "mvn release:perform"
+  sh %Q{mvn -Dgpg.passphrase="xxxxxxx" -Darguments="-Dgpg.passphrase=xxxxxxxxx" release:perform}
 end
