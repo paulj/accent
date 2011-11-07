@@ -44,4 +44,16 @@ public class AccentTestUtils {
       }
     };
   }
+
+  /**
+   * Generates a ConnectionFailureListener that prints out failures to ensure tests don't silently have problems.
+   * @return the listener.
+   */
+  public static ConnectionFailureListener smallPrintingFailureLogger() {
+    return new ConnectionFailureListener() {
+      @Override public void connectionFailure(Exception e) {
+        System.err.println("Connection Failure Occurred:" + e.getMessage());
+      }
+    };
+  }
 }
