@@ -53,6 +53,7 @@ public class ExceptionUtils {
       return s.isInitiatedByApplication() &&
           ((replyCode == AMQP.CONNECTION_FORCED) ||
               (replyCode == AMQP.INTERNAL_ERROR) ||
+              s instanceof AlreadyClosedException ||
               (s.getCause() instanceof EOFException));
     }
     return false;

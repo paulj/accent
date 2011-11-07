@@ -93,9 +93,7 @@ public class AccentChannel implements ConnectionListener, Closeable {
    * @throws IOException if an exception occurs setting up the channel within the connection.
    */
   public void onConnected(final Connection connection) throws IOException {
-    synchronized (channelStateLock) {
-      channel = connection.createChannel();
-      channel.addShutdownListener(new ShutdownListener() {
+    ShutdownListener shutdownListener = new ShutdownListener() {
         @Override
         public void shutdownCompleted(ShutdownSignalException cause) {
           synchronized (channelStateLock) {
@@ -111,7 +109,15 @@ public class AccentChannel implements ConnectionListener, Closeable {
             AccentChannel.this.connection.rebuild(AccentChannel.this);
           }
         }
-      });
+      };
+
+    // Attach a shutdown listener to the connection so if it goes completely, we'll be able to tear down
+    // our channel.
+    connection.addShutdownListener(shutdownListener);
+
+    synchronized (channelStateLock) {
+      channel = connection.createChannel();
+      channel.addShutdownListener(shutdownListener);
 
       // Invoke the setup listeners
       for (ChannelListener cb : setupListeners) {

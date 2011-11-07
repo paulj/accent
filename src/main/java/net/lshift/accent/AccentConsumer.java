@@ -162,7 +162,8 @@ public class AccentConsumer implements ChannelListener, Closeable {
 
     @Override
     public void handleShutdownSignal(String consumerTag, ShutdownSignalException sig) {
-      underlyingConsumer.handleShutdownSignal(consumerTag, sig);
+      // Don't proxy shutdown signals to the underlying consumer, since we don't want our connection failures
+      // to cause the consumer implementation to shut down.
     }
 
     @Override

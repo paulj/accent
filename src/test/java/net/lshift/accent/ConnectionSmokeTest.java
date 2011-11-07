@@ -19,17 +19,14 @@ import com.rabbitmq.client.AMQP;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.ConnectionFactory;
 import com.rabbitmq.client.QueueingConsumer;
-import com.rabbitmq.tools.Tracer;
+import com.rabbitmq.utility.BlockingCell;
 import org.junit.Before;
 import org.junit.Test;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Properties;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
+import static org.junit.Assert.*;
 
 /**
  * Smoke tests executed against real RabbitMQ instances.
@@ -42,7 +39,7 @@ public class ConnectionSmokeTest {
 
   @Test
   public void shouldConnectPublishAndConsume() throws IOException, InterruptedException {
-    AccentConnection conn = new AccentConnection(new ConnectionFactory(), AccentTestUtils.printingFailureLogger());
+    AccentConnection conn = new AccentConnection(directFactory(), AccentTestUtils.printingFailureLogger());
     try {
       AccentChannel ch = conn.createChannel();
 
@@ -66,23 +63,16 @@ public class ConnectionSmokeTest {
 
       aConsumer.reliableAck(d.getEnvelope().getDeliveryTag(), false);
 
-
-
-      aConsumer.close();
+      closeQuietly(aConsumer);
     } finally {
-      conn.close();
+      closeQuietly(conn);
     }
   }
 
   @Test
   public void shouldConsumeEvenIfConnectionIsntCreatedUntilLater() throws IOException, InterruptedException {
-    // Create a connection and deliver a message
-    ConnectionFactory directFactory = new ConnectionFactory();
-    ConnectionFactory managedFactory = new ConnectionFactory();
-    managedFactory.setPort(5673);
-
-    AccentConnection directConn = new AccentConnection(directFactory, AccentTestUtils.printingFailureLogger());
-    AccentConnection managedConn = new AccentConnection(managedFactory, AccentTestUtils.smallPrintingFailureLogger());
+    AccentConnection directConn = new AccentConnection(directFactory(), AccentTestUtils.printingFailureLogger());
+    AccentConnection managedConn = new AccentConnection(controlledFactory(5673), AccentTestUtils.smallPrintingFailureLogger());
     try {
       AccentChannel directCh = directConn.createChannel();
       AccentChannel managedCh = managedConn.createChannel();
@@ -108,7 +98,7 @@ public class ConnectionSmokeTest {
       assertNull(d);
 
       // Start the tracer to give us a valid connection
-      ConnectionProxy proxy = createProxy(5673);
+      ControlledConnectionProxy proxy = createProxy(5673);
       try {
         QueueingConsumer.Delivery d2 = consumer.nextDelivery(2000);
         assertNotNull(d2);
@@ -116,51 +106,78 @@ public class ConnectionSmokeTest {
 
         aConsumer.reliableAck(d2.getEnvelope().getDeliveryTag(), false);
 
-        aConsumer.close();
+        closeQuietly(aConsumer);
       } finally {
-        proxy.close();
+        closeQuietly(proxy);
       }
     } finally {
-      managedConn.close();
+      closeQuietly(managedConn);
+      closeQuietly(directConn);
     }
   }
 
-  private static ConnectionProxy createProxy(int port) throws IOException {
-    return new ConnectionProxy(port);
+  @Test
+  public void shouldRecoverConsumeIfConnectionIsLost() throws IOException, InterruptedException {
+    AccentConnection conn = new AccentConnection(controlledFactory(5675), AccentTestUtils.printingFailureLogger());
+    ControlledConnectionProxy proxy = createProxy(5675);
+    try {
+      AccentChannel ch = conn.createChannel();
+
+      // Add a setup listener to create the queue
+      ch.addChannelSetupListener(new ChannelListenerAdapter() {
+        @Override public void channelCreated(Channel c) throws IOException {
+          c.queueDeclare("accent.testq", false, false, true, null);
+        }
+      });
+
+      QueueingConsumer consumer = new QueueingConsumer(null);
+      AccentConsumer aConsumer = new AccentConsumer(ch, "accent.testq", consumer);
+
+      // Ensure that our consumer works
+      AccentConfirmPublisher publisher = new AccentConfirmPublisher(ch);
+      publisher.reliablePublish("", "accent.testq", new AMQP.BasicProperties(), new byte[0]);
+      QueueingConsumer.Delivery d = consumer.nextDelivery(10000);
+      assertNotNull(d);
+      aConsumer.reliableAck(d.getEnvelope().getDeliveryTag(), false);
+
+      // Terminate the connection and recreate it
+      proxy.close();
+      proxy.start();
+
+      // Send another message through, and ensure that we see it
+      publisher.reliablePublish("", "accent.testq", new AMQP.BasicProperties(), new byte[0]);
+      QueueingConsumer.Delivery d2 = consumer.nextDelivery(10000);
+      assertNotNull(d);
+      aConsumer.reliableAck(d2.getEnvelope().getDeliveryTag(), false);
+
+      closeQuietly(aConsumer);
+    } finally {
+      closeQuietly(proxy);
+      closeQuietly(conn);
+    }
   }
 
-  private static class ConnectionProxy implements Closeable, Tracer.Logger {
-    private final int listenPort;
-    private Tracer tracer;
-
-    private ConnectionProxy(int listenPort) throws IOException {
-      this.listenPort = listenPort;
-      this.tracer = new Tracer(listenPort, "proxy", "localhost", ConnectionFactory.DEFAULT_AMQP_PORT, this, new Properties());
-      this.tracer.start();
+  private static ConnectionFactory directFactory() {
+    return new ConnectionFactory();
+  }
+  private static ConnectionFactory controlledFactory(int port) {
+    ConnectionFactory controlledFactory = new ConnectionFactory();
+    controlledFactory.setPort(port);
+    return controlledFactory;
+  }
+  private static void closeQuietly(Closeable c) {
+    try {
+      c.close();
+    } catch (IOException e) {
+      // Ignore
     }
+  }
 
-    @Override
-    public void close() throws IOException {
-    }
+  private static ControlledConnectionProxy createProxy(int port) throws IOException {
+    ControlledConnectionProxy proxy = new ControlledConnectionProxy(
+      port, "proxy", "localhost", ConnectionFactory.DEFAULT_AMQP_PORT, new BlockingCell<Exception>());
+    proxy.start();
 
-
-    //
-    // Tracer Logger Implementation
-    //
-
-
-    @Override
-    public boolean start() {
-      return true;
-    }
-
-    @Override
-    public boolean stop() {
-      return true;
-    }
-
-    @Override
-    public void log(String msg) {
-    }
+    return proxy;
   }
 }
