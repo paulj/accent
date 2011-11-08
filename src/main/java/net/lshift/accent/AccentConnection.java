@@ -83,7 +83,7 @@ public class AccentConnection implements Closeable {
       closeMutex.notifyAll();
     }
     synchronized (connectionMutex) {
-      if (connection != null) connection.abort();
+      if (connection != null) connection.abort(100);
     }
 
     try { connectThread.join(10000); } catch (InterruptedException ex) { /* Ignore */ }
@@ -190,7 +190,9 @@ public class AccentConnection implements Closeable {
       // Ensure that the connection is closed
       synchronized (connectionMutex) {
         try {
-          connection.abort();
+          if (connection.isOpen()) {
+            connection.abort(100);
+          }
         } catch (Exception ce) {
           // Ignore
         }
